@@ -49,11 +49,7 @@ LEDS
 ==*/
 DigitalOut LED(LED1);
 DigitalOut tickerLED(LED2);
-
-/*====
-SERIAL
-====*/
-Serial PC(USBTX, USBRX);
+DigitalOut debugLED(LED3);
 
 /*==================
 SPEED CONTROL (DACS)
@@ -79,15 +75,7 @@ ENCODDERS
 AS5600 encoderLeft(I2C_SDA, I2C_SCL);
 //AS5600 encoderRight(PA_10, PA_9);
 
-/*=
-ROS
-=*/
-ros::NodeHandle nh;
-ros::Time current_time, last_time;
-ros::Subscriber<sensor_msgs::Joy> joy_sub("joy", &controllerCB);
-ros::Publisher odom_pub("odom", &odom_msg);
-tf::TransformBroadcaster odom_broadcaster;
-nav_msgs::Odometry odom_msg;
+
 
 /*==================
 CONTROLLER VARIABLES
@@ -129,6 +117,15 @@ void controllerCB(const sensor_msgs::Joy &joy_msg) {
     
 }
 
+/*=
+ROS
+=*/
+ros::NodeHandle nh;
+ros::Time current_time, last_time;
+nav_msgs::Odometry odom_msg;
+ros::Subscriber<sensor_msgs::Joy> joy_sub("joy", &controllerCB);
+ros::Publisher odom_pub("odom", &odom_msg);
+tf::TransformBroadcaster odom_broadcaster;
 
 
 
@@ -136,12 +133,15 @@ void controllerCB(const sensor_msgs::Joy &joy_msg) {
 
 int main() {
     
-    nh.getHardware()->setBaud(256000);      //set ROSSERIAL baud rate
+    nh.getHardware()->setBaud(921600);      //set ROSSERIAL baud rate
     nh.initNode();                          //initialise node
     nh.subscribe(joy_sub);                  //subscribe to ROS topic "joy"
     nh.advertise(odom_pub);                 //publish to ROS topic "odom"
     odom_broadcaster.init(nh);              //initialise Transform Broadcaster "oom_broadcaster"
 
+    while(!nh.connected()){
+        nh.spinOnce();
+    }
 
     current_time = nh.now();                //grab current time
     last_time = nh.now();                   //initialise last_time to current time
@@ -220,7 +220,11 @@ int main() {
 
 
         if(encoderLeft.isMagnetPresent()){
+            int tmp_pos = new_Pos_Left;
             new_Pos_Left = encoderLeft.getAngleAbsolute();
+            if(tmp_pos != new_Pos_Left){
+                debugLED = !debugLED;
+            }
         }else{
             
         }
@@ -340,7 +344,8 @@ int main() {
         odom_msg.twist.twist.angular.z = vth;
 
         //publish the message
-        odom_pub.publish(&odom_msg);                 
+        odom_pub.publish(&odom_msg);     
+                   
         
         old_Pos_Left = new_Pos_Left;
         old_Pos_Right = new_Pos_Right;
