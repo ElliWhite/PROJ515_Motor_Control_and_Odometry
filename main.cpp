@@ -6,6 +6,7 @@
 #include <tf.h>
 #include <sensor_msgs/Joy.h>
 #include <nav_msgs/Odometry.h>
+#include <std_msgs/Int16.h>
 #include "as5600.h"
 #include "Matrix.h"
 
@@ -36,8 +37,8 @@
 #define lMotorDirectionPin PF_13
 #define rMotorDirectionPin PE_9
 
-#define lMotorEnablePin PB_10
-#define rMotorEnablePin PB_11
+#define lMotorEnablePin PE_14
+#define rMotorEnablePin PE_15
 
 //2*pi*r / 4096 = 105.5575cm/4096 = 1.055575m/4096
 #define M_PER_STEP 0.000257709
@@ -72,8 +73,8 @@ DigitalOut rMotorEnable(rMotorEnablePin);
 /*=======
 ENCODDERS
 =======*/
-AS5600 encoderLeft(I2C_SDA, I2C_SCL);
-//AS5600 encoderRight(PA_10, PA_9);
+AS5600 encoderLeft(PB_11, PB_10);
+AS5600 encoderRight(I2C_SDA, I2C_SCL);
 
 
 
@@ -123,9 +124,12 @@ ROS
 ros::NodeHandle nh;
 ros::Time current_time, last_time;
 nav_msgs::Odometry odom_msg;
+std_msgs::Int16 debug_left_msg, debug_right_msg;
 ros::Subscriber<sensor_msgs::Joy> joy_sub("joy", &controllerCB);
 ros::Publisher odom_pub("odom", &odom_msg);
 tf::TransformBroadcaster odom_broadcaster;
+ros::Publisher debug_left_pub("debug_left", &debug_left_msg);
+ros::Publisher debug_right_pub("debug_right", &debug_right_msg);
 
 
 
@@ -138,6 +142,11 @@ int main() {
     nh.subscribe(joy_sub);                  //subscribe to ROS topic "joy"
     nh.advertise(odom_pub);                 //publish to ROS topic "odom"
     odom_broadcaster.init(nh);              //initialise Transform Broadcaster "oom_broadcaster"
+    nh.advertise(debug_left_pub);
+    nh.advertise(debug_right_pub);
+    
+    lMotorEnable = 0;                   //disable motors
+    rMotorEnable = 0;   
 
     while(!nh.connected()){
         nh.spinOnce();
@@ -147,33 +156,20 @@ int main() {
     last_time = nh.now();                   //initialise last_time to current time
 
     int16_t old_Pos_Left = encoderLeft.getAngleAbsolute();          //initialise encoder values
-    int16_t old_Pos_Right = 0;//encoderRight.getAngleAbsolute();    
+    int16_t old_Pos_Right = encoderRight.getAngleAbsolute();    
     int16_t new_Pos_Left = encoderLeft.getAngleAbsolute();
-    int16_t new_Pos_Right = 0; //encoderRight.getAngleAbsolute();
+    int16_t new_Pos_Right = encoderRight.getAngleAbsolute();
     int16_t delta_Left_Pos = 0;             //change in encoder value for LEFT encoder
     int16_t delta_Right_Pos = 0;            //change in encoder value for RIGHT encoder
 
-    double old_x = 0.0;                     //old x coordinate of robot
-    double old_y = 0.0;                     //old y coordinate of robot
-    double old_th = 0.0;                    //old theta (heading) of robot
     double new_x = 0.0;                     //new (current) estimate of x coordinate of robot
     double new_y = 0.0;                     //new (current) esitamte of y coordinate of robot
     double new_th = 0.0;                    //new (current) estimate of theta (heading) of robot
-    double angular_rot = 0.0;               //angular rotation velocity
-    double ICC_x = 0.0;                     //x coordinate of common rotation point of wheels
-    double ICC_y = 0.0;                     //y coordinate of common rotation point of wheels
-    double R = 0.0;                         //radius between centre of wheelbase and common rotation point
+
     double vx = 0.0;                        //linear velocity in forwards direction
     double vth = 0.0;                       //angular rotation velocity of robot
 
-    Matrix mat_delta_Pose(3,1);             //matrix to hold position estimates
-    Matrix mat_rotation(3,3);               //rotational matrix
-    Matrix mat_delta_ICC(3,1);              //matrix to hold difference between pose and ICC
-    Matrix mat_ICC(3,1);                    //matrix to hold position of ICC and angular rotation
 
-    //HERE FOR TESTING ONLY WHEN RIGHT ENCODER ISN'T CONNCETED
-    old_Pos_Right = 0;
-    //********************************************************
     
    
     while(1){
@@ -220,31 +216,32 @@ int main() {
 
 
         if(encoderLeft.isMagnetPresent()){
-            int tmp_pos = new_Pos_Left;
             new_Pos_Left = encoderLeft.getAngleAbsolute();
-            if(tmp_pos != new_Pos_Left){
-                debugLED = !debugLED;
-            }
-        }else{
-            
         }
-        //*****************************************************************
-        //COMMENTED OUT FOR TESTING ONLY WHEN RIGHT ENCODER ISN'T CONNCETED
-        //*****************************************************************
-        /*
+            
+        
         if(encoderRight.isMagnetPresent()){
             new_Pos_Right = encoderRight.getAngleAbsolute();
-        }else{
-            PC.printf("[ERROR] Magnet Not Present - RIGHT\n\r");
-        }*/
-        
-        //HERE FOR TESTING ONLY WHEN RIGHT ENCODER ISN'T CONNCETED
-        new_Pos_Right = 0;
-        //********************************************************
+        } 
+      
 
         delta_Left_Pos = new_Pos_Left - old_Pos_Left;
-        delta_Right_Pos = new_Pos_Right - old_Pos_Right;
-
+        delta_Right_Pos = (new_Pos_Right - old_Pos_Right) * -1;
+        
+        //remove noise
+        if(delta_Left_Pos == 1 || delta_Left_Pos == -1){
+            delta_Left_Pos = 0;
+        }
+        if(delta_Right_Pos == 1 || delta_Right_Pos == -1){
+            delta_Right_Pos = 0;
+        }
+        
+        //if either wheel positions change, toggle the debug (red) LED
+        if(delta_Left_Pos != 0 || delta_Right_Pos != 0){
+            debugLED = !debugLED;
+        }
+        
+        
         //calculations to deal with rollover of absolute encoder
         //returns true delta_Pos when rollover does occur
         if(delta_Left_Pos > 2047){
@@ -258,45 +255,11 @@ int main() {
             delta_Right_Pos =  delta_Right_Pos + 4096;
         }
         
-                
-        if(delta_Left_Pos != 0 || delta_Right_Pos != 0){
-            R = (WHEEL_BASE_LENGTH_OVER_2_M * (delta_Left_Pos+delta_Right_Pos)) / (delta_Right_Pos - delta_Left_Pos);
-            //PC.printf("R = %f\n\r", R);
-        }else{
-            R = 0.0;
-        }
+        debug_left_msg.data = delta_Left_Pos;
+        debug_left_pub.publish(&debug_left_msg);
+        debug_right_msg.data = delta_Right_Pos;
+        debug_right_pub.publish(&debug_right_msg);   
         
-        angular_rot = ((delta_Right_Pos - delta_Left_Pos) * M_PER_STEP) / WHEEL_BASE_LENGTH_M;
-        
-        ICC_x = old_x - (R*sin(old_th));
-        ICC_y = old_y + (R*cos(old_th));
-
-        mat_rotation.Clear();
-
-        mat_rotation    << cos(angular_rot)     << -sin(angular_rot)    << 0
-                        << sin(angular_rot)     << cos(angular_rot)     << 0
-                        << 0                    << 0                    << 1;
-                        
-        mat_delta_ICC.Clear();
-
-        mat_delta_ICC   << old_x - ICC_x
-                        << old_y - ICC_y
-                        << old_th;
-
-        mat_ICC.Clear();
-
-        mat_ICC         << ICC_x
-                        << ICC_y
-                        << angular_rot;
-
-        mat_delta_Pose = (mat_rotation * mat_delta_ICC) + mat_ICC;
-
-        new_x = mat_delta_Pose.getNumber(1,1);
-        new_y = mat_delta_Pose.getNumber(2,1);
-        new_th = mat_delta_Pose.getNumber(3,1);
-
-
-        //PC.printf("%f %f\n\r", new_x, new_y);
         
         /*****************
         COMPUTE VELOCITIES
@@ -306,6 +269,17 @@ int main() {
         double v_right = (delta_Right_Pos * M_PER_STEP) / dt;
         vx = (v_left + v_right) / 2;
         vth = (v_right - v_left) / WHEEL_BASE_LENGTH_M;
+        
+        //compute odometry in a typical way given the velocities of the robot
+        double delta_x = (vx * cos(new_th)) * dt;
+        double delta_y = (vx * sin(new_th)) * dt;
+        double delta_th = vth * dt;
+        
+        new_x += delta_x;
+        new_y += delta_y;
+        new_th += delta_th;
+        
+        
         
         /****************************
         SET TRANSFORM AND ODOM PARAMS
@@ -349,12 +323,9 @@ int main() {
         
         old_Pos_Left = new_Pos_Left;
         old_Pos_Right = new_Pos_Right;
-        old_x = new_x;
-        old_y = new_y;
-        old_th = new_th;
         last_time = current_time;
         
-        wait_ms(50);
+        wait_ms(1);
 
 
 
