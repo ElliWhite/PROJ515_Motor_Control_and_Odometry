@@ -6,9 +6,10 @@
 #include <tf.h>
 #include <sensor_msgs/Joy.h>
 #include <nav_msgs/Odometry.h>
-#include <std_msgs/Int16.h>
+#include "std_msgs/Float64.h"
 #include "as5600.h"
 #include "pid.h"
+
 
 #define A_BUTTON    0
 #define B_BUTTON    1
@@ -45,7 +46,6 @@
 #define WHEEL_BASE_LENGTH_M 0.291
 #define WHEEL_BASE_LENGTH_OVER_2_M 0.1455
 
-
 /*==
 LEDS
 ==*/
@@ -80,8 +80,8 @@ AS5600 encoderRight(I2C_SDA, I2C_SCL);
 /*=
 PID
 =*/
-PID leftMotorPID(0, 0, 0, 0, 1, 100);       //Kp, Ki, Kd, min, max, integral_limit
-PID rightMotorPID(0, 0, 0, 0, 1, 100);
+PID leftMotorPID(5000, 7, 200, 0, 1, 0.5);       //Kp, Ki, Kd, min, max, integral_limit
+PID rightMotorPID(1500, 5.2, 200, 0, 1, 0.5);
 
 
 
@@ -103,7 +103,7 @@ float max_speed = 0.0f;             //maximum motor speed
 bool a_butt = false;                //enable boolean linked to button A
 bool b_butt = false;
 
-float target_linear_vel = 0.0f;
+float target_linear_vel = 1.0f;
 float target_turn_vel = 0.0f;
 
 //Remap number from one range to another
@@ -138,16 +138,16 @@ ROS
 ros::NodeHandle nh;
 ros::Time current_time, last_time;
 nav_msgs::Odometry odom_msg;
-std_msgs::Int16 debug_left_msg, debug_right_msg;
+std_msgs::Float64 vel_time;
+std_msgs::Float64 vel_left;
+std_msgs::Float64 vel_right;
 //ros::Subscriber<sensor_msgs::Joy> joy_sub("joy", &controllerCB);
 ros::Subscriber<geometry_msgs::Twist> twist_sub("mtr_ctrl/cmd_vel", &controllerCB);
 ros::Publisher odom_pub("odom", &odom_msg);
 tf::TransformBroadcaster odom_broadcaster;
-ros::Publisher debug_left_pub("debug_left", &debug_left_msg);
-ros::Publisher debug_right_pub("debug_right", &debug_right_msg);
-
-
-
+ros::Publisher vel_left_pub("left_vel", &vel_left);
+ros::Publisher vel_right_pub("right_vel", &vel_right);
+ros::Publisher vel_time_pub("time", &vel_time);
 
 
 int main() {
@@ -158,8 +158,10 @@ int main() {
     nh.subscribe(twist_sub);
     nh.advertise(odom_pub);                 //publish to ROS topic "odom"
     odom_broadcaster.init(nh);              //initialise Transform Broadcaster "oom_broadcaster"
-    nh.advertise(debug_left_pub);
-    nh.advertise(debug_right_pub);
+    nh.advertise(vel_left_pub);
+    nh.advertise(vel_right_pub);
+    nh.advertise(vel_time_pub);
+
     
     lMotorEnable = 0;                   //disable motors
     rMotorEnable = 0;   
@@ -184,8 +186,6 @@ int main() {
 
     double vx = 0.0;                        //linear velocity in forwards direction
     double vth = 0.0;                       //angular rotation velocity of robot
-
-
     
    
     while(1){
@@ -196,15 +196,23 @@ int main() {
         
         current_time = nh.now();        //grab current time
 
-        if(target_vel > 0){
+        if(target_linear_vel > 0){
             //forwards
             lMotorDirection = 1;
             rMotorDirection = 0;
-        }else if(target_vel < 0){
+            lMotorEnable = 1;                   //enable motors
+            rMotorEnable = 1;   
+        }else if(target_linear_vel < 0){
             //backwards
             lMotorDirection = 0;
             rMotorDirection = 1;
-        }
+            lMotorEnable = 1;                   //enable motors
+            rMotorEnable = 1; 
+        }else{
+            lMotorEnable = 0;                   //disable motors
+            rMotorEnable = 0;
+        } 
+            
 
         if(encoderLeft.isMagnetPresent()){
             new_Pos_Left = encoderLeft.getAngleAbsolute();
@@ -244,10 +252,6 @@ int main() {
             delta_Right_Pos =  delta_Right_Pos + 4096;
         }
         
-        debug_left_msg.data = delta_Left_Pos;
-        debug_left_pub.publish(&debug_left_msg);
-        debug_right_msg.data = delta_Right_Pos;
-        debug_right_pub.publish(&debug_right_msg);   
         
         /*****************
         COMPUTE VELOCITIES
@@ -277,9 +281,17 @@ int main() {
         //output of PID loop will be the value to write to the motors
         double new_v_left = leftMotorPID.calculate(v_left, target_linear_vel, dt);
         double new_v_right = rightMotorPID.calculate(v_right, target_linear_vel, dt);
-        Left_Motor_Speed.write(new_v_left);
+        Left_Motor_Speed.write(1-new_v_left);
         Right_Motor_Speed.write(new_v_right);
         
+        
+        vel_left.data = float(v_left);
+        vel_right.data = float(v_right);
+        vel_time.data = float(dt);
+        
+        vel_left_pub.publish(&vel_left);
+        vel_right_pub.publish(&vel_right);
+        vel_time_pub.publish(&vel_time);
         
         /****************************
         SET TRANSFORM AND ODOM PARAMS
