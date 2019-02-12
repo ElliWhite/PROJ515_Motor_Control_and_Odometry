@@ -9,6 +9,7 @@
 #include "std_msgs/Float64.h"
 #include "as5600.h"
 #include "pid.h"
+#include "Matrix.h"
 
 
 #define A_BUTTON    0
@@ -41,10 +42,11 @@
 #define lMotorEnablePin PE_14
 #define rMotorEnablePin PE_15
 
-//2*pi*r / 4096 = 105.5575cm/4096 = 1.055575m/4096
-#define M_PER_STEP 0.000257709
+//2*pi*r / 4096 = 52.77875cm/4096 = 0.5277875m/4096
+#define M_PER_STEP 0.0001288545
 #define WHEEL_BASE_LENGTH_M 0.291
 #define WHEEL_BASE_LENGTH_OVER_2_M 0.1455
+#define WHEEL_RADIUS 0.0839999
 
 /*==
 LEDS
@@ -103,7 +105,7 @@ float max_speed = 0.0f;             //maximum motor speed
 bool a_butt = false;                //enable boolean linked to button A
 bool b_butt = false;
 
-float target_linear_vel = 1.0f;
+float target_linear_vel = 0.0f;
 float target_turn_vel = 0.0f;
 
 //Remap number from one range to another
@@ -111,22 +113,7 @@ float Remap(float value, float from1, float to1, float from2, float to2) {
     return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
 }
 
-//ROS Callback
-/*
-void controllerCB(const sensor_msgs::Joy &joy_msg) {
-    
-    //split up joy_msg and take the right trigger and left stick components.
-    right_trig = joy_msg.axes[RIGHT_TRIGGER_INDEX];
-    left_trig = joy_msg.axes[LEFT_TRIGGER_INDEX];
-    turn = joy_msg.axes[LEFT_STICK_LR_INDEX];
-    
-    //take button input from joy_msg to enable or disable the motors.
-    if(joy_msg.buttons[A_BUTTON] == 1){
-        a_butt = true;
-    }else if(joy_msg.buttons[B_BUTTON] == 1){
-        a_butt = false;
-    }
-}*/
+
 void controllerCB(const geometry_msgs::Twist &twist) {
     target_linear_vel = twist.linear.x;
     target_turn_vel = twist.angular.z;
@@ -165,6 +152,9 @@ int main() {
     
     lMotorEnable = 0;                   //disable motors
     rMotorEnable = 0;   
+    
+    
+ 
 
     while(!nh.connected()){
         nh.spinOnce();
@@ -187,8 +177,16 @@ int main() {
     double vx = 0.0;                        //linear velocity in forwards direction
     double vth = 0.0;                       //angular rotation velocity of robot
     
+    Matrix mat_target_vels(2,1);            //matrix to hold target velocities, linear and angular
+    Matrix mat_wheel_vels(2,1);             //matrix to hold angular velocities of the wheels
+    Matrix mat_conversion(2,2);             //matrix to hold the conversion matrix to convert target velocities
+                                            //to wheel angular velocities
+                                            
+    mat_conversion << 1/WHEEL_RADIUS    << WHEEL_BASE_LENGTH_M/(2*WHEEL_RADIUS)
+                   << 1/WHEEL_RADIUS    << -WHEEL_BASE_LENGTH_M/(2*WHEEL_RADIUS);
+    
    
-    while(1){
+    while(nh.connected()){
 
         tickerLED = !tickerLED;
 
@@ -270,17 +268,27 @@ int main() {
         new_x += delta_x;
         new_y += delta_y;
         new_th += delta_th;
+
+
+        /*******************************************************************
+        CONVERTING OVERALL LINEAR AND ANGULAR TO INDIVIDUAL WHEEL VELOCITIES
+        *******************************************************************/
+        mat_target_vels.Clear();
+        mat_target_vels << target_linear_vel    << target_turn_vel;
+
+        mat_wheel_vels.Clear();
+        mat_wheel_vels = (mat_conversion * mat_target_vels);
+
+        double right_target_vel = WHEEL_RADIUS * mat_wheel_vels.getNumber(1,1);
+        double left_target_vel = WHEEL_RADIUS * mat_wheel_vels.getNumber(2,1);
+
         
         /**
         PID
         **/
-        /**********************************************************************
-        //WILL NEED TO CHANGE THIS SO IT WORKS WITH LINEAR VELOCITY AND ANGULAR 
-        //VELOCITIES. 
-        /*********************************************************************/
         //output of PID loop will be the value to write to the motors
-        double new_v_left = leftMotorPID.calculate(v_left, target_linear_vel, dt);
-        double new_v_right = rightMotorPID.calculate(v_right, target_linear_vel, dt);
+        double new_v_left = leftMotorPID.calculate(v_left, left_target_vel, dt);
+        double new_v_right = rightMotorPID.calculate(v_right, right_target_vel, dt);
         Left_Motor_Speed.write(1-new_v_left);
         Right_Motor_Speed.write(new_v_right);
         
@@ -292,6 +300,7 @@ int main() {
         vel_left_pub.publish(&vel_left);
         vel_right_pub.publish(&vel_right);
         vel_time_pub.publish(&vel_time);
+        
         
         /****************************
         SET TRANSFORM AND ODOM PARAMS
@@ -340,5 +349,11 @@ int main() {
         wait_ms(1);
 
     }
+    
+    //disable motors if lose connection to ROS master
+    lMotorEnable = 0;
+    rMotorEnable = 0;
+    
+    
 
 }
