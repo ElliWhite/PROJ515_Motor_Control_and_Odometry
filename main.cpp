@@ -87,31 +87,12 @@ PID rightMotorPID(1500, 5.2, 200, 0, 1, 0.5);
 
 
 
-/*==================
-CONTROLLER VARIABLES
-==================*/
-float left_vel = 1.0f;              //left motor velocity, start at max because ESC speed control is difference between Vref and control input.
-float right_vel = 1.0f;             //right motor velocity
-float right_trig = 0.0f;            //right trigger value
-float left_trig = 0.0f;             //left trigger value
-float turn = 0.0f;                  //turn value
-float turn_tmp = 0.0f;              //temp turn
-float right_remapped_trig = 0.0f;   //right remapped trigger
-float left_remapped_trig = 0.0f;    //left remapped trigger
-float turn_mag = 0.3f;              //magnitude of the turn
 
-float max_speed = 0.0f;             //maximum motor speed
 
-bool a_butt = false;                //enable boolean linked to button A
-bool b_butt = false;
 
 float target_linear_vel = 0.0f;
 float target_turn_vel = 0.0f;
 
-//Remap number from one range to another
-float Remap(float value, float from1, float to1, float from2, float to2) {
-    return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
-}
 
 
 void controllerCB(const geometry_msgs::Twist &twist) {
@@ -128,33 +109,31 @@ nav_msgs::Odometry odom_msg;
 std_msgs::Float64 vel_time;
 std_msgs::Float64 vel_left;
 std_msgs::Float64 vel_right;
-//ros::Subscriber<sensor_msgs::Joy> joy_sub("joy", &controllerCB);
+std_msgs::Float64 left_motor_val_msg;
 ros::Subscriber<geometry_msgs::Twist> twist_sub("mtr_ctrl/cmd_vel", &controllerCB);
 ros::Publisher odom_pub("odom", &odom_msg);
 tf::TransformBroadcaster odom_broadcaster;
 ros::Publisher vel_left_pub("left_vel", &vel_left);
 ros::Publisher vel_right_pub("right_vel", &vel_right);
 ros::Publisher vel_time_pub("time", &vel_time);
+ros::Publisher left_motor_val_pub("left_motor_val", &left_motor_val_msg);
 
 
 int main() {
     
     nh.getHardware()->setBaud(921600);      //set ROSSERIAL baud rate
     nh.initNode();                          //initialise node
-    //nh.subscribe(joy_sub);                  //subscribe to ROS topic "joy"
     nh.subscribe(twist_sub);
     nh.advertise(odom_pub);                 //publish to ROS topic "odom"
     odom_broadcaster.init(nh);              //initialise Transform Broadcaster "oom_broadcaster"
     nh.advertise(vel_left_pub);
     nh.advertise(vel_right_pub);
     nh.advertise(vel_time_pub);
+    nh.advertise(left_motor_val_pub);
 
     
     lMotorEnable = 0;                   //disable motors
     rMotorEnable = 0;   
-    
-    
- 
 
     while(!nh.connected()){
         nh.spinOnce();
@@ -194,13 +173,13 @@ int main() {
         
         current_time = nh.now();        //grab current time
 
-        if(target_linear_vel > 0){
+        if(target_linear_vel > 0.0f){
             //forwards
             lMotorDirection = 1;
             rMotorDirection = 0;
             lMotorEnable = 1;                   //enable motors
             rMotorEnable = 1;   
-        }else if(target_linear_vel < 0){
+        }else if(target_linear_vel < 0.0f){
             //backwards
             lMotorDirection = 0;
             rMotorDirection = 1;
@@ -287,10 +266,13 @@ int main() {
         PID
         **/
         //output of PID loop will be the value to write to the motors
-        double new_v_left = leftMotorPID.calculate(v_left, left_target_vel, dt);
-        double new_v_right = rightMotorPID.calculate(v_right, right_target_vel, dt);
+        double new_v_left = leftMotorPID.calculate(abs(v_left), abs(left_target_vel), dt);
+        double new_v_right = rightMotorPID.calculate(abs(v_right), abs(right_target_vel), dt);
         Left_Motor_Speed.write(1-new_v_left);
         Right_Motor_Speed.write(new_v_right);
+        
+        left_motor_val_msg.data = float(left_target_vel);
+        left_motor_val_pub.publish(&left_motor_val_msg);
         
         
         vel_left.data = float(v_left);
