@@ -6,9 +6,11 @@
 #include <tf.h>
 #include <sensor_msgs/Joy.h>
 #include <nav_msgs/Odometry.h>
-#include <std_msgs/Int16.h>
+#include "std_msgs/Float64.h"
 #include "as5600.h"
+#include "pid.h"
 #include "Matrix.h"
+
 
 #define A_BUTTON    0
 #define B_BUTTON    1
@@ -31,8 +33,8 @@
 #define DPAD_LR_INDEX           6
 #define DPAD_UP_INDEX           7
 
-#define lMotorControlPin PA_4
-#define rMotorControlPin PA_5
+#define lMotorSpeedControlPin PA_4
+#define rMotorSpeedControlPin PA_5
 
 #define lMotorDirectionPin PF_13
 #define rMotorDirectionPin PE_9
@@ -40,10 +42,11 @@
 #define lMotorEnablePin PE_14
 #define rMotorEnablePin PE_15
 
-//2*pi*r / 4096 = 105.5575cm/4096 = 1.055575m/4096
-#define M_PER_STEP 0.000257709
+//2*pi*r / 4096 = 52.77875cm/4096 = 0.5277875m/4096
+#define M_PER_STEP 0.0001288545
 #define WHEEL_BASE_LENGTH_M 0.291
 #define WHEEL_BASE_LENGTH_OVER_2_M 0.1455
+#define WHEEL_RADIUS 0.0839999
 
 /*==
 LEDS
@@ -55,8 +58,8 @@ DigitalOut debugLED(LED3);
 /*==================
 SPEED CONTROL (DACS)
 ==================*/
-AnalogOut Left_Wheel(lMotorControlPin);
-AnalogOut Right_Wheel(rMotorControlPin);
+AnalogOut Left_Motor_Speed(lMotorSpeedControlPin);
+AnalogOut Right_Motor_Speed(rMotorSpeedControlPin);
 
 /*=============
 MOTOR DIRECTION
@@ -76,46 +79,25 @@ ENCODDERS
 AS5600 encoderLeft(PB_11, PB_10);
 AS5600 encoderRight(I2C_SDA, I2C_SCL);
 
+/*=
+PID
+=*/
+PID leftMotorPID(5000, 7, 200, 0, 1, 0.5);       //Kp, Ki, Kd, min, max, integral_limit
+PID rightMotorPID(1500, 5.2, 200, 0, 1, 0.5);
 
 
-/*==================
-CONTROLLER VARIABLES
-==================*/
-float left_vel = 1.0f;              //left motor velocity, start at max because ESC speed control is difference between Vref and control input.
-float right_vel = 1.0f;             //right motor velocity
-float right_trig = 0.0f;            //right trigger value
-float left_trig = 0.0f;             //left trigger value
-float turn = 0.0f;                  //turn value
-float turn_tmp = 0.0f;              //temp turn
-float right_remapped_trig = 0.0f;   //right remapped trigger
-float left_remapped_trig = 0.0f;    //left remapped trigger
-float turn_mag = 0.3f;              //magnitude of the turn
 
-float max_speed = 0.0f;             //maximum motor speed
 
-bool a_butt = false;                //enable boolean linked to button A
-bool b_butt = false;
 
-//Remap number from one range to another
-float Remap(float value, float from1, float to1, float from2, float to2) {
-    return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
-}
 
-//ROS Callback
-void controllerCB(const sensor_msgs::Joy &joy_msg) {
-    
-    //split up joy_msg and take the right trigger and left stick components.
-    right_trig = joy_msg.axes[RIGHT_TRIGGER_INDEX];
-    left_trig = joy_msg.axes[LEFT_TRIGGER_INDEX];
-    turn = joy_msg.axes[LEFT_STICK_LR_INDEX];
-    
-    //take button input from joy_msg to enable or disable the motors.
-    if(joy_msg.buttons[A_BUTTON] == 1){
-        a_butt = true;
-    }else if(joy_msg.buttons[B_BUTTON] == 1){
-        a_butt = false;
-    }
-    
+float target_linear_vel = 0.0f;
+float target_turn_vel = 0.0f;
+
+
+
+void controllerCB(const geometry_msgs::Twist &twist) {
+    target_linear_vel = twist.linear.x;
+    target_turn_vel = twist.angular.z;
 }
 
 /*=
@@ -124,26 +106,31 @@ ROS
 ros::NodeHandle nh;
 ros::Time current_time, last_time;
 nav_msgs::Odometry odom_msg;
-std_msgs::Int16 debug_left_msg, debug_right_msg;
-ros::Subscriber<sensor_msgs::Joy> joy_sub("joy", &controllerCB);
+std_msgs::Float64 vel_time;
+std_msgs::Float64 vel_left;
+std_msgs::Float64 vel_right;
+std_msgs::Float64 left_motor_val_msg;
+ros::Subscriber<geometry_msgs::Twist> twist_sub("mtr_ctrl/cmd_vel", &controllerCB);
 ros::Publisher odom_pub("odom", &odom_msg);
 tf::TransformBroadcaster odom_broadcaster;
-ros::Publisher debug_left_pub("debug_left", &debug_left_msg);
-ros::Publisher debug_right_pub("debug_right", &debug_right_msg);
-
-
-
+ros::Publisher vel_left_pub("left_vel", &vel_left);
+ros::Publisher vel_right_pub("right_vel", &vel_right);
+ros::Publisher vel_time_pub("time", &vel_time);
+ros::Publisher left_motor_val_pub("left_motor_val", &left_motor_val_msg);
 
 
 int main() {
     
     nh.getHardware()->setBaud(921600);      //set ROSSERIAL baud rate
     nh.initNode();                          //initialise node
-    nh.subscribe(joy_sub);                  //subscribe to ROS topic "joy"
+    nh.subscribe(twist_sub);
     nh.advertise(odom_pub);                 //publish to ROS topic "odom"
     odom_broadcaster.init(nh);              //initialise Transform Broadcaster "oom_broadcaster"
-    nh.advertise(debug_left_pub);
-    nh.advertise(debug_right_pub);
+    nh.advertise(vel_left_pub);
+    nh.advertise(vel_right_pub);
+    nh.advertise(vel_time_pub);
+    nh.advertise(left_motor_val_pub);
+
     
     lMotorEnable = 0;                   //disable motors
     rMotorEnable = 0;   
@@ -168,63 +155,51 @@ int main() {
 
     double vx = 0.0;                        //linear velocity in forwards direction
     double vth = 0.0;                       //angular rotation velocity of robot
-
-
+    
+    Matrix mat_target_vels(2,1);            //matrix to hold target velocities, linear and angular
+    Matrix mat_wheel_vels(2,1);             //matrix to hold angular velocities of the wheels
+    Matrix mat_conversion(2,2);             //matrix to hold the conversion matrix to convert target velocities
+                                            //to wheel angular velocities
+                                            
+    mat_conversion << 1/WHEEL_RADIUS    << WHEEL_BASE_LENGTH_M/(2*WHEEL_RADIUS)
+                   << 1/WHEEL_RADIUS    << -WHEEL_BASE_LENGTH_M/(2*WHEEL_RADIUS);
     
    
-    while(1){
+    while(nh.connected()){
 
         tickerLED = !tickerLED;
 
+        nh.spinOnce();                  //check for incoming messages
+        
         current_time = nh.now();        //grab current time
 
-        nh.spinOnce();                  //check for incoming messages
-
-        //remap right trigger input
-        right_remapped_trig = Remap(right_trig, -1.0f, 1.0f, max_speed, 1.0f);
-        left_remapped_trig = Remap(left_trig, -1.0f, 1.0f, max_speed, 1.0f);
-        turn_tmp = turn;
-        
-        //if the a button is pressed, motors are enabled. 
-        if(a_butt == true){
-            if((left_remapped_trig > 0.9f) && (right_remapped_trig < 0.9f)){
-                //forwards
-                lMotorDirection = 1;
-                rMotorDirection = 0;
-                left_vel = (right_remapped_trig + (turn * turn_mag));           //set left wheel velocity to remapped trigger value
-                right_vel = 1 - (right_remapped_trig - (turn * turn_mag));      //set right wheel velocity to inverted remapped trigger value
-            }else if((left_remapped_trig < 0.9f) && (right_remapped_trig > 0.9f)){
-                //backwards
-                lMotorDirection = 0;
-                rMotorDirection = 1;
-                left_vel = left_remapped_trig + (turn * turn_mag);           //set left wheel velocity to remapped trigger value
-                right_vel = 1 - (left_remapped_trig - (turn * turn_mag));      //set right wheel velocity to inverted remapped trigger value
-            }else{
-                left_vel = 1.0f;
-                right_vel = 0.0f;   
-            }
-            lMotorEnable = 1;                   //enable left motor
-            rMotorEnable = 1;                   //enable right motor
-            Left_Wheel.write(left_vel);         //set left control pin to left wheel velocity
-            Right_Wheel.write(right_vel);       //set right control pin to right wheel velocity
-            LED = 1;                            //turn onboard LED on to show motors enabled.
+        if(target_linear_vel > 0.0f){
+            //forwards
+            lMotorDirection = 1;
+            rMotorDirection = 0;
+            lMotorEnable = 1;                   //enable motors
+            rMotorEnable = 1;   
+        }else if(target_linear_vel < 0.0f){
+            //backwards
+            lMotorDirection = 0;
+            rMotorDirection = 1;
+            lMotorEnable = 1;                   //enable motors
+            rMotorEnable = 1; 
         }else{
             lMotorEnable = 0;                   //disable motors
-            rMotorEnable = 0;                   
-            LED = 0;                            //turn onboard LED off
-        }
-
+            rMotorEnable = 0;
+        } 
+            
 
         if(encoderLeft.isMagnetPresent()){
             new_Pos_Left = encoderLeft.getAngleAbsolute();
-        }
-            
+        }   
         
         if(encoderRight.isMagnetPresent()){
             new_Pos_Right = encoderRight.getAngleAbsolute();
-        } 
-      
+        }
 
+        //find change in encoder position for both wheels
         delta_Left_Pos = new_Pos_Left - old_Pos_Left;
         delta_Right_Pos = (new_Pos_Right - old_Pos_Right) * -1;
         
@@ -241,7 +216,6 @@ int main() {
             debugLED = !debugLED;
         }
         
-        
         //calculations to deal with rollover of absolute encoder
         //returns true delta_Pos when rollover does occur
         if(delta_Left_Pos > 2047){
@@ -254,11 +228,6 @@ int main() {
         }else if(delta_Right_Pos < -2047){
             delta_Right_Pos =  delta_Right_Pos + 4096;
         }
-        
-        debug_left_msg.data = delta_Left_Pos;
-        debug_left_pub.publish(&debug_left_msg);
-        debug_right_msg.data = delta_Right_Pos;
-        debug_right_pub.publish(&debug_right_msg);   
         
         
         /*****************
@@ -278,7 +247,41 @@ int main() {
         new_x += delta_x;
         new_y += delta_y;
         new_th += delta_th;
+
+
+        /*******************************************************************
+        CONVERTING OVERALL LINEAR AND ANGULAR TO INDIVIDUAL WHEEL VELOCITIES
+        *******************************************************************/
+        mat_target_vels.Clear();
+        mat_target_vels << target_linear_vel    << target_turn_vel;
+
+        mat_wheel_vels.Clear();
+        mat_wheel_vels = (mat_conversion * mat_target_vels);
+
+        double right_target_vel = WHEEL_RADIUS * mat_wheel_vels.getNumber(1,1);
+        double left_target_vel = WHEEL_RADIUS * mat_wheel_vels.getNumber(2,1);
+
         
+        /**
+        PID
+        **/
+        //output of PID loop will be the value to write to the motors
+        double new_v_left = leftMotorPID.calculate(abs(v_left), abs(left_target_vel), dt);
+        double new_v_right = rightMotorPID.calculate(abs(v_right), abs(right_target_vel), dt);
+        Left_Motor_Speed.write(1-new_v_left);
+        Right_Motor_Speed.write(new_v_right);
+        
+        left_motor_val_msg.data = float(left_target_vel);
+        left_motor_val_pub.publish(&left_motor_val_msg);
+        
+        
+        vel_left.data = float(v_left);
+        vel_right.data = float(v_right);
+        vel_time.data = float(dt);
+        
+        vel_left_pub.publish(&vel_left);
+        vel_right_pub.publish(&vel_right);
+        vel_time_pub.publish(&vel_time);
         
         
         /****************************
@@ -327,10 +330,12 @@ int main() {
         
         wait_ms(1);
 
-
-
-
-
     }
+    
+    //disable motors if lose connection to ROS master
+    lMotorEnable = 0;
+    rMotorEnable = 0;
+    
+    
 
 }
