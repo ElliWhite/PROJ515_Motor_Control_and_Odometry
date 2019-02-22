@@ -6,7 +6,9 @@
 #include <tf.h>
 #include <sensor_msgs/Joy.h>
 #include <nav_msgs/Odometry.h>
+#include <dynamic_reconfigure/Reconfigure.h>
 #include "std_msgs/Float64.h"
+#include "std_msgs/Float32.h"
 #include "as5600.h"
 #include "pid.h"
 #include "Matrix.h"
@@ -33,6 +35,11 @@
 #define DPAD_LR_INDEX           6
 #define DPAD_UP_INDEX           7
 
+#define RECONFIG_KP_INDEX       0
+#define RECONFIG_KI_INDEX       1
+#define RECONFIG_KD_INDEX       2
+
+
 #define lMotorSpeedControlPin PA_4
 #define rMotorSpeedControlPin PA_5
 
@@ -41,6 +48,9 @@
 
 #define lMotorEnablePin PE_14
 #define rMotorEnablePin PE_15
+
+#define killSwitchEnablePin PG_9
+#define killSwitchMonitorPin PG_14
 
 //2*pi*r / 4096 = 52.77875cm/4096 = 0.5277875m/4096
 #define M_PER_STEP 0.0001288545
@@ -51,7 +61,7 @@
 /*==
 LEDS
 ==*/
-DigitalOut LED(LED1);
+DigitalOut motorEnableLED(LED1);
 DigitalOut tickerLED(LED2);
 DigitalOut debugLED(LED3);
 
@@ -84,39 +94,95 @@ PID
 =*/
 PID leftMotorPID(5000, 7, 200, 0, 1, 0.5);       //Kp, Ki, Kd, min, max, integral_limit
 PID rightMotorPID(1500, 5.2, 200, 0, 1, 0.5);
+//PID leftMotorPID(0.4, 9, 0.2, 0, 1, 0.1);       //Kp, Ki, Kd, min, max, integral_limit
+//PID rightMotorPID(0, 0, 0, 0, 1, 0.5);
+bool doPIDDebugging = 1;
+double Kp = 0, Ki = 0, Kd = 0;
 
 
 
 
+
+
+
+/*=========
+KILL SWITCH
+=========*/
+DigitalOut killSwitchEnable(killSwitchEnablePin);
+DigitalIn  killSwitchMonitor(killSwitchMonitorPin);
 
 
 float target_linear_vel = 0.0f;
 float target_turn_vel = 0.0f;
 
 
-
+/*====================
+SPEED CONTROL CALLBACK
+====================*/
 void controllerCB(const geometry_msgs::Twist &twist) {
     target_linear_vel = twist.linear.x;
     target_turn_vel = twist.angular.z;
 }
 
+/*===================
+PID SETPOINT CALLBACK
+===================*/
+void setpointCB(const std_msgs::Float64  &setpoint) {
+    target_linear_vel = setpoint.data;
+}
+
+/*=========================
+PID CONTROL EFFORT CALLBACK
+=========================*/
+float right_control_effort = 0.0f;
+void controlEffortCB(const std_msgs::Float64  &controlEffort) {
+    right_control_effort = controlEffort.data;
+}
+
+/*======================
+PID RECONFIGURE CALLBACK
+======================*/
+void pidCB(const dynamic_reconfigure::ReconfigureRequest &req, dynamic_reconfigure::ReconfigureResponse &res){
+    Kp = double(req.config.doubles[RECONFIG_KP_INDEX].value);
+    Ki = double(req.config.doubles[RECONFIG_KI_INDEX].value);
+    Kd = double(req.config.doubles[RECONFIG_KD_INDEX].value);
+}
+
+
 /*=
 ROS
 =*/
-ros::NodeHandle nh;
-ros::Time current_time, last_time;
-nav_msgs::Odometry odom_msg;
-std_msgs::Float64 vel_time;
-std_msgs::Float64 vel_left;
-std_msgs::Float64 vel_right;
-std_msgs::Float64 left_motor_val_msg;
-ros::Subscriber<geometry_msgs::Twist> twist_sub("mtr_ctrl/cmd_vel", &controllerCB);
-ros::Publisher odom_pub("odom", &odom_msg);
-tf::TransformBroadcaster odom_broadcaster;
-ros::Publisher vel_left_pub("left_vel", &vel_left);
-ros::Publisher vel_right_pub("right_vel", &vel_right);
-ros::Publisher vel_time_pub("time", &vel_time);
-ros::Publisher left_motor_val_pub("left_motor_val", &left_motor_val_msg);
+ros::NodeHandle     nh;
+ros::Time           current_time, last_time;
+
+nav_msgs::Odometry  odom_msg;
+std_msgs::Float64   vel_left_msg;
+std_msgs::Float64   vel_right_msg;
+std_msgs::Float64   motor_time_msg;
+std_msgs::Float64   left_motor_val_msg;
+std_msgs::Float64   right_motor_val_msg;
+std_msgs::Float64   target_linear_vel_msg;
+
+std_msgs::Float32   p_msg;
+std_msgs::Float32   i_msg;
+std_msgs::Float32   d_msg;
+
+ros::Subscriber<geometry_msgs::Twist> twist_sub("cmd_vel", &controllerCB);
+//ros::Subscriber<geometry_msgs::Twist> twist_sub("mtr_ctrl/cmd_vel", &controllerCB);
+
+ros::Publisher              odom_pub("odom", &odom_msg);
+tf::TransformBroadcaster    odom_broadcaster;
+ros::Publisher              vel_left_pub("left_vel", &vel_left_msg);
+ros::Publisher              vel_right_pub("right_vel", &vel_right_msg);
+ros::Publisher              motor_time_pub("motor_time", &motor_time_msg);
+ros::Publisher              left_motor_val_pub("left_motor_val", &left_motor_val_msg);
+ros::Publisher              right_motor_val_pub("right_motor_val", &right_motor_val_msg);
+ros::Publisher              target_linear_vel_pub("target_vel", &target_linear_vel_msg);
+
+ros::ServiceServer<dynamic_reconfigure::ReconfigureRequest, dynamic_reconfigure::ReconfigureResponse>          pid_server("mbed_pid/set_parameters", &pidCB);
+ros::Publisher                      vel_right_state_pub("state", &vel_right_msg);
+ros::Subscriber<std_msgs::Float64>  setpoint_sub("setpoint", &setpointCB);
+ros::Subscriber<std_msgs::Float64>  control_effort_sub("control_effort", &controlEffortCB);
 
 
 int main() {
@@ -128,13 +194,30 @@ int main() {
     odom_broadcaster.init(nh);              //initialise Transform Broadcaster "oom_broadcaster"
     nh.advertise(vel_left_pub);
     nh.advertise(vel_right_pub);
-    nh.advertise(vel_time_pub);
-    nh.advertise(left_motor_val_pub);
+    
+    
+    
+   if(doPIDDebugging){
+        nh.advertise(motor_time_pub);
+        nh.advertise(left_motor_val_pub);
+        nh.advertise(right_motor_val_pub);
+        nh.advertise(target_linear_vel_pub);
+
+        //nh.advertiseService(pid_server);
+        nh.advertise(vel_right_state_pub);
+        nh.subscribe(setpoint_sub);
+        nh.subscribe(control_effort_sub);
+    }
+    
+    killSwitchEnable = 1;
+    killSwitchMonitor.mode(PullDown);
 
     
     lMotorEnable = 0;                   //disable motors
-    rMotorEnable = 0;   
+    rMotorEnable = 0; 
+    motorEnableLED = 0;  
 
+    //wait for ROS to connect to board
     while(!nh.connected()){
         nh.spinOnce();
     }
@@ -148,6 +231,8 @@ int main() {
     int16_t new_Pos_Right = encoderRight.getAngleAbsolute();
     int16_t delta_Left_Pos = 0;             //change in encoder value for LEFT encoder
     int16_t delta_Right_Pos = 0;            //change in encoder value for RIGHT encoder
+    int16_t previous_delta_Left_Pos = 0;    //holds the previous change in encoder value for LEFT encoder
+    int16_t previous_delta_Right_Pos = 0;   //holds the previous change in encoder value for RIGHT encoder
 
     double new_x = 0.0;                     //new (current) estimate of x coordinate of robot
     double new_y = 0.0;                     //new (current) esitamte of y coordinate of robot
@@ -163,9 +248,27 @@ int main() {
                                             
     mat_conversion << 1/WHEEL_RADIUS    << WHEEL_BASE_LENGTH_M/(2*WHEEL_RADIUS)
                    << 1/WHEEL_RADIUS    << -WHEEL_BASE_LENGTH_M/(2*WHEEL_RADIUS);
+
+    //if debugging PID we need to publish dummy velocity data for the wheels.
+    //this is initially zero as the wheels aren't moving. This allows the pid_plotting.py
+    //script to plot some initial values on the graph so we can more clearly see
+    //how the PID controllers are performing
+    if(doPIDDebugging){
+        for(int i = 0; i < 50; i++){
+            vel_left_msg.data = float(0);
+            vel_right_msg.data = float(0);
+            motor_time_msg.data = float(0.016);
+            target_linear_vel_msg.data = float(0);
+            vel_left_pub.publish(&vel_left_msg);
+            vel_right_pub.publish(&vel_right_msg);
+            motor_time_pub.publish(&motor_time_msg);
+            target_linear_vel_pub.publish(&target_linear_vel_msg);
+            wait_ms(30);
+        }
+    }
     
    
-    while(nh.connected()){
+    while(nh.connected() && killSwitchMonitor == 1){
 
         tickerLED = !tickerLED;
 
@@ -178,16 +281,33 @@ int main() {
             lMotorDirection = 1;
             rMotorDirection = 0;
             lMotorEnable = 1;                   //enable motors
-            rMotorEnable = 1;   
+            rMotorEnable = 1;
+            motorEnableLED = 1;     
         }else if(target_linear_vel < 0.0f){
             //backwards
             lMotorDirection = 0;
             rMotorDirection = 1;
             lMotorEnable = 1;                   //enable motors
             rMotorEnable = 1; 
+            motorEnableLED = 1;  
+        }else if(target_linear_vel == 0.0f && target_turn_vel > 0.0f){
+            //spin on the spot left
+            lMotorDirection = 0;
+            rMotorDirection = 0;
+            lMotorEnable = 1;                   //enable motors
+            rMotorEnable = 1; 
+            motorEnableLED = 1;  
+        }else if(target_linear_vel == 0.0f && target_turn_vel < 0.0f){
+            //spin on the spot right
+            lMotorDirection = 1;
+            rMotorDirection = 1;
+            lMotorEnable = 1;                   //enable motors
+            rMotorEnable = 1; 
+            motorEnableLED = 1;  
         }else{
             lMotorEnable = 0;                   //disable motors
             rMotorEnable = 0;
+            motorEnableLED = 0;  
         } 
             
 
@@ -210,6 +330,22 @@ int main() {
         if(delta_Right_Pos == 1 || delta_Right_Pos == -1){
             delta_Right_Pos = 0;
         }
+
+        //sometimes the encoder would read a value which results in the algorithm thinking
+        //the motor has suddenly changed direction and is spinning fast. This is impossible
+        //so to mitigate this error we keep track of the previous change in position
+        //and use this to see if the change is too large for it to be possible
+        if(abs(delta_Left_Pos - previous_delta_Left_Pos) > 100){
+            delta_Left_Pos = previous_delta_Left_Pos;
+        }else{
+            previous_delta_Left_Pos = delta_Left_Pos;
+        }
+        if(abs(delta_Right_Pos - previous_delta_Right_Pos) > 100){
+            delta_Right_Pos = previous_delta_Right_Pos;
+        }else{
+            previous_delta_Right_Pos = delta_Right_Pos;
+        }
+        
         
         //if either wheel positions change, toggle the debug (red) LED
         if(delta_Left_Pos != 0 || delta_Right_Pos != 0){
@@ -249,6 +385,20 @@ int main() {
         new_th += delta_th;
 
 
+       //disable motors if comms with encoders fails. We expect dt to stay below
+        //15ms and when it loses communication dt increases, so can use this to 
+        //control motors.
+        if(dt > 0.018){
+            lMotorEnable = 0;
+            rMotorEnable = 0;
+            motorEnableLED = 0;
+        } else {
+            lMotorEnable = 1;
+            rMotorEnable = 1;
+            motorEnableLED = 1;
+        }
+
+
         /*******************************************************************
         CONVERTING OVERALL LINEAR AND ANGULAR TO INDIVIDUAL WHEEL VELOCITIES
         *******************************************************************/
@@ -258,30 +408,53 @@ int main() {
         mat_wheel_vels.Clear();
         mat_wheel_vels = (mat_conversion * mat_target_vels);
 
-        double right_target_vel = WHEEL_RADIUS * mat_wheel_vels.getNumber(1,1);
-        double left_target_vel = WHEEL_RADIUS * mat_wheel_vels.getNumber(2,1);
+        double right_target_vel = WHEEL_RADIUS * double(mat_wheel_vels.getNumber(1,1));
+        double left_target_vel = WHEEL_RADIUS * double(mat_wheel_vels.getNumber(2,1));
 
         
-        /**
-        PID
-        **/
-        //output of PID loop will be the value to write to the motors
-        double new_v_left = leftMotorPID.calculate(abs(v_left), abs(left_target_vel), dt);
-        double new_v_right = rightMotorPID.calculate(abs(v_right), abs(right_target_vel), dt);
-        Left_Motor_Speed.write(1-new_v_left);
-        Right_Motor_Speed.write(new_v_right);
+        /**************
+        PID CONTROLLERS
+        **************/      
+        if(doPIDDebugging){
+            //need to redeclare here to use new gain values from autotuner
+            PID leftMotorPID(Kp, Ki, Kd, 0, 1, 0.5);       //Kp, Ki, Kd, min, max, integral_limit
+            PID rightMotorPID(0, 0, 0, 0, 1, 0.5);
+            //output of PID loop will be the value to write to the motors
+            double new_v_left = leftMotorPID.calculate(abs(v_left), abs(left_target_vel), dt);
+            double new_v_right = rightMotorPID.calculate(abs(v_right), abs(right_target_vel), dt);
+            
+            Left_Motor_Speed.write(1-new_v_left);
+            Right_Motor_Speed.write(right_control_effort);
+            
+            left_motor_val_msg.data = float(new_v_left);
+            right_motor_val_msg.data = float(new_v_right);
+            left_motor_val_pub.publish(&left_motor_val_msg);
+            right_motor_val_pub.publish(&right_motor_val_msg);
+            
+            target_linear_vel_msg.data = target_linear_vel;
+            target_linear_vel_pub.publish(&target_linear_vel_msg);
+            
+            motor_time_msg.data = float(dt);
+            motor_time_pub.publish(&motor_time_msg);
+            
+            vel_right_state_pub.publish(&vel_right_msg);
+
+        }else{
+            //output of PID loop will be the value to write to the motors
+            double new_v_left = leftMotorPID.calculate(abs(v_left), abs(left_target_vel), dt);
+            double new_v_right = rightMotorPID.calculate(abs(v_right), abs(right_target_vel), dt);
+            Left_Motor_Speed.write(1-new_v_left);
+            Right_Motor_Speed.write(new_v_right);
+        }
+            
         
-        left_motor_val_msg.data = float(left_target_vel);
-        left_motor_val_pub.publish(&left_motor_val_msg);
+                
+        vel_left_msg.data = float(v_left);
+        vel_right_msg.data = float(v_right);
+        vel_left_pub.publish(&vel_left_msg);
+        vel_right_pub.publish(&vel_right_msg);
         
         
-        vel_left.data = float(v_left);
-        vel_right.data = float(v_right);
-        vel_time.data = float(dt);
-        
-        vel_left_pub.publish(&vel_left);
-        vel_right_pub.publish(&vel_right);
-        vel_time_pub.publish(&vel_time);
         
         
         /****************************
@@ -304,7 +477,7 @@ int main() {
         //send the transform
         odom_broadcaster.sendTransform(odom_trans);
 
-        //now publish the odometry message over ROS
+        //now set up the odometry message
         odom_msg.header.stamp = current_time;
         odom_msg.header.frame_id = "/odom";
 
@@ -320,7 +493,7 @@ int main() {
         odom_msg.twist.twist.linear.y = 0.0;        //will always be 0 as assuming there will be no "slippage"
         odom_msg.twist.twist.angular.z = vth;
 
-        //publish the message
+        //publish the message over ROS
         odom_pub.publish(&odom_msg);     
                    
         
@@ -335,6 +508,9 @@ int main() {
     //disable motors if lose connection to ROS master
     lMotorEnable = 0;
     rMotorEnable = 0;
+    motorEnableLED = 0;
+    tickerLED = 0;
+    debugLED = 0;
     
     
 

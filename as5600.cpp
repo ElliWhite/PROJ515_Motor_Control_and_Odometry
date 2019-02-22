@@ -5,7 +5,7 @@ AS5600::AS5600(PinName sda, PinName scl) : i2c(sda,scl){
     //device address is 7-bit. 8th-bit is read/write bit.
     //read = 1, write = 0
     devAddress=0x36;
-    i2c.frequency(400000);
+    i2c.frequency(100000);
     degPerPip = 0.087890625;
 }
 
