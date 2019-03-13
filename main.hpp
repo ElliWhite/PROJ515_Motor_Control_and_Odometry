@@ -21,15 +21,21 @@
 #define killSwitchMonitorPin PG_14
 
 #define M_PER_STEP 0.0001288545
-#define WHEEL_BASE_LENGTH_M 0.291
-#define WHEEL_BASE_LENGTH_OVER_2_M 0.1455
+#define WHEEL_BASE_LENGTH_M 0.2957
+#define WHEEL_BASE_LENGTH_OVER_2_M 0.14785
 #define WHEEL_RADIUS 0.0839999
 
 
 /*============================= GLOBAL VARIABLES =============================*/
 
-bool doPIDDebugging = 0;
-bool remoteControl = 0;
+bool doPIDDebugging = 0;            // Boolean to control whether PID debugging topics are published
+bool remoteControl = 1;             // Boolean to control whether subscribed to /mtr_ctrl/cmd_vel for..
+                                    // ..Xbox remote control.
+bool useEKF = 1;                    // Boolean to control whether using the EKF package
+                                    // This controls whether a transform from odom -> base_link..
+                                    // ..is being published and changes the odom topic to /wheel_odom
+bool testOdom = 1;                  // Boolean to control whether extra odom messages are published with the..
+                                    // ..different localisation methods
 float target_linear_vel = 0.0f;
 float target_turn_vel = 0.0f;
 
