@@ -34,7 +34,7 @@ bool remoteControl = 1;             // Boolean to control whether subscribed to 
 bool useEKF = 1;                    // Boolean to control whether using the EKF package
                                     // This controls whether a transform from odom -> base_link..
                                     // ..is being published and changes the odom topic to /wheel_odom
-bool testOdom = 1;                  // Boolean to control whether extra odom messages are published with the..
+bool testOdom = 0;                  // Boolean to control whether extra odom messages are published with the..
                                     // ..different localisation methods
 float target_linear_vel = 0.0f;
 float target_turn_vel = 0.0f;

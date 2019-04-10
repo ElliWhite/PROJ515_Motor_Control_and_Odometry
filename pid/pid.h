@@ -1,8 +1,5 @@
 #include "mbed.h"
 
-
-
-
 class PID {
     public:
         PID(double Kp, double Ki, double Kd, double min, double max, double integral_limit);
@@ -11,8 +8,6 @@ class PID {
         double i_out;
         double d_out;
 
-        
-    
     private:
         double _Kp;
         double _Ki;
