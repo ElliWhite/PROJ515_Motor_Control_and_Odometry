@@ -6,7 +6,14 @@
 /*============================= CLASS CONSTRUCTOR ============================*/
 
 /* Class Constructor */
-ESC::ESC(PinName speedControlPin, PinName directionPin, PinName enablePin) :  _speedControl(speedControlPin), _direction(directionPin), _enable(enablePin){}
+ESC::ESC(PinName speedControlPin, PinName directionPin, PinName enablePin) :  
+
+    _speedControl(speedControlPin), 
+    _direction(directionPin),  
+    _enable(enablePin)
+    {
+        braking_state = NOT_BRAKING;
+    }
 
 /*================================= FUNCTIONS ================================*/
 
@@ -33,7 +40,7 @@ void ESC::setEnable(char enable){
 /*================================*/
 void ESC::setSpeed(double speed){
     
-    _speedControl.write(speed);
+    _speedControl.write(speed); 
 
 }
 
