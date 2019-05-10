@@ -11,6 +11,7 @@
 #include <nav_msgs/Odometry.h>
 #include "std_msgs/Float64.h"
 #include "std_msgs/Float32.h"
+#include "std_msgs/Char.h"
 #include "as5600.hpp"
 #include "pid.h"
 #include "Matrix.h"
@@ -38,6 +39,11 @@ bool useEKF = 0;                    // Boolean to control whether using the EKF 
                                     // ..is being published and changes the odom topic to /wheel_odom
 bool testOdom = 0;                  // Boolean to control whether extra odom messages are published with the..
                                     // ..different localisation methods
+bool useSensorFusion = 1;           // Boolean to decide whether using sensor fusion.
+bool testSensorFusion = 1;          // Boolean to decide whether testing sensor fusion.
+
+bool enableBrakes = 1;              // Boolean to decide whether brakes are being used.
+
 float target_linear_vel = 0.0f;
 float target_turn_vel = 0.0f;
 
