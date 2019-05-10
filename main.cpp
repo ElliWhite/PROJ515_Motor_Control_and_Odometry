@@ -46,6 +46,7 @@ std_msgs::Float64           motor_time_msg;
 std_msgs::Float64           left_motor_val_msg;
 std_msgs::Float64           right_motor_val_msg;
 std_msgs::Float64           target_linear_vel_msg;
+std_msgs::Char              left_esc_state_msg;
 ros::Publisher              vel_left_pub("left_vel", &vel_left_msg);
 ros::Publisher              vel_right_pub("right_vel", &vel_right_msg);
 ros::Publisher              odom_pub("odom", &odom_exact_msg);
@@ -56,6 +57,7 @@ ros::Publisher              motor_time_pub("motor_time", &motor_time_msg);
 ros::Publisher              left_motor_val_pub("left_motor_val", &left_motor_val_msg);
 ros::Publisher              right_motor_val_pub("right_motor_val", &right_motor_val_msg);
 ros::Publisher              target_linear_vel_pub("target_vel", &target_linear_vel_msg);
+ros::Publisher              left_esc_state_pub("left_esc_state", &left_esc_state_msg);
 tf::TransformBroadcaster    odom_broadcaster;
 ros::Subscriber<geometry_msgs::Twist>   twist_sub("cmd_vel", &cmdVelCB);
 ros::Subscriber<geometry_msgs::Twist>   controller_sub("mtr_ctrl/cmd_vel", &controllerCB);
@@ -71,7 +73,22 @@ int main() {
     nh.initNode();                          // Initialise ROS node
     nh.subscribe(twist_sub);                // Subscribe to ROS topic "cmd_vel" topic for velocity control
 
-    // If not using Robot Localisation EKF
+    // If not using Sensor Fusion
+    if (!useSensorFusion) {
+        odom_broadcaster.init(nh);              // Initialise Transform Broadcaster "odom_broadcaster"
+        nh.advertise(odom_pub);                 // Publish to ROS topic "odom" for odometry from the wheels
+    } else {
+        if (testSensorFusion) {
+            nh.advertise(wheel_odom_exact_pub); // Publish to ROS topic "wheel_odom" for odometry from the wheels
+            odom_broadcaster.init(nh);          // Initialise Transform Broadcaster "odom_broadcaster"
+        } else {
+            nh.advertise(wheel_odom_exact_pub); // Publish to ROS topic "wheel_odom" for odometry from the wheels
+        }
+    }
+
+    nh.advertise(left_esc_state_pub);
+
+    /*
     if (!useEKF) {
         odom_broadcaster.init(nh);              // Initialise Transform Broadcaster "odom_broadcaster"
         nh.advertise(odom_pub);                 // Publish to ROS topic "odom" for odometry from the wheels
@@ -79,6 +96,7 @@ int main() {
         nh.advertise(wheel_odom_exact_pub);     // Publish to ROS topic "wheel_odom" for odometry from the wheels
     }                                           // This is different as the output of the Robot Localisation EKF ..
                                                 // .. uses the topic "odom"
+    */
 
     // If testing different odometry localisation algorithms
     if (testOdom) {
@@ -159,37 +177,52 @@ int main() {
     */
 
 
-
-    // Set relays to having brakes on initially
-    // (setting pin low turns then 'on')
-    //wait_ms(500);
-    leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
-    //wait_ms(500);
-    leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
-    //wait_ms(500);
-    leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
-    //wait_ms(500);
-    wait_ms(12);
-    leftBrakeRelay_4.write(0.0f);
-    leftBrakeRelay_4.period(0.2f);
-    //wait_ms(500);
-    leftBrakeRelay_5.write(0.0f);
-    leftBrakeRelay_5.period(0.2f);
-    //wait_ms(500);
-    rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
-    //wait_ms(500);
-    rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
-    //wait_ms(500);
-    rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
-    //wait_ms(500);
-    wait_ms(12);
-    rightBrakeRelay_4.write(0.0f);
-    rightBrakeRelay_4.period(0.3f);
-    //wait_ms(500);
-    rightBrakeRelay_5.write(0.0f);
-    rightBrakeRelay_5.period(0.3f);
-    //wait_ms(500);
-    
+    if (enableBrakes) {
+        // Set relays to having brakes on initially
+        // (setting pin low turns then 'on')
+        //wait_ms(500);
+        leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
+        //wait_ms(500);
+        leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
+        //wait_ms(500);
+        leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
+        //wait_ms(500);
+        wait_ms(12);
+        leftBrakeRelay_4.write(0.0f);
+        leftBrakeRelay_4.period(0.2f);
+        //wait_ms(500);
+        leftBrakeRelay_5.write(0.0f);
+        leftBrakeRelay_5.period(0.2f);
+        //wait_ms(500);
+        rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
+        //wait_ms(500);
+        rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
+        //wait_ms(500);
+        rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
+        //wait_ms(500);
+        wait_ms(12);
+        rightBrakeRelay_4.write(0.0f);
+        rightBrakeRelay_4.period(0.3f);
+        //wait_ms(500);
+        rightBrakeRelay_5.write(0.0f);
+        rightBrakeRelay_5.period(0.3f);
+        //wait_ms(500);
+    } else {
+        leftBrakeRelay_1 = RELAY_CONNECT_AC;
+        leftBrakeRelay_2 = RELAY_CONNECT_AC;
+        leftBrakeRelay_3 = RELAY_CONNECT_AC;
+        leftBrakeRelay_4.write(1.0f);
+        leftBrakeRelay_4.period(0.2f);
+        leftBrakeRelay_5.write(1.0f);
+        leftBrakeRelay_5.period(0.2f);
+        rightBrakeRelay_1 = RELAY_CONNECT_AC;
+        rightBrakeRelay_2 = RELAY_CONNECT_AC;
+        rightBrakeRelay_3 = RELAY_CONNECT_AC;
+        rightBrakeRelay_4.write(1.0f);
+        rightBrakeRelay_4.period(0.2f);
+        rightBrakeRelay_5.write(1.0f);
+        rightBrakeRelay_5.period(0.2f);
+    }
 
 
     // Disable motors
@@ -210,7 +243,7 @@ int main() {
     last_time = nh.now();                   // Initialise last_time to current time
 
     Timer motor_stationary_timer;           // Timer acting as a timeout for motors if cmd_vel is still sending velocities
-                                            // but the robot is not moving
+    // but the robot is not moving
 
     //global_test_timer.start();
 
@@ -236,18 +269,16 @@ int main() {
 
     double vrobot = 0.0;                    // Linear velocity of robot (m/s)
     double vth = 0.0;                       // Angular rotational velocity of robot (rad/s)
-    
-    double old_v_right = 0.0;
 
     Matrix mat_target_vels(2, 1);           // Matrix to hold target velocities, linear and angular
     Matrix mat_target_wheel_vels(2, 1);     // Matrix to hold target angular velocities of the wheels
     Matrix mat_convert_target_vels(2, 2);   // Matrix to hold the conversion matrix to convert target velocities
-                                            // to wheel angular velocities
+    // to wheel angular velocities
 
     Matrix mat_wheel_vels(2, 1);            // Matrix to hold actual angular velocities of the wheels
     Matrix mat_robot_vels(2, 1);            // Matrix to hold linear and angular velocities of robot
     Matrix mat_convert_actual_vels(2, 2);   // Matrix to hold the conversion matrix to convert actual wheel angular velocities
-                                            // to linear and angular velocities of robot
+    // to linear and angular velocities of robot
 
     // Fill "conversion from target velocities to wheel angular velocities" matrix
     mat_convert_target_vels << 1 / WHEEL_RADIUS    << WHEEL_BASE_LENGTH_M / (2 * WHEEL_RADIUS)
@@ -396,33 +427,143 @@ int main() {
                 /**********************************
                 MOTOR DIRECTION AND BRAKING CONTROL
                 **********************************/
-                if (leftESC.braking_state == STATIONARY_BRAKES_ON && (target_linear_vel != 0 || target_turn_vel != 0)) {
-                    leftESC.braking_state = NOT_BRAKING;
-                    leftESC.stationary_braking_timer.start();
-                    leftBrakeRelay_4.write(1.0f);
-                    leftBrakeRelay_5.write(1.0f);
-                } else if (leftESC.braking_state == NOT_BRAKING && leftESC.stationary_braking_timer.read_ms() > 12) {
-                    leftBrakeRelay_1 = RELAY_CONNECT_AC;
-                    leftBrakeRelay_2 = RELAY_CONNECT_AC;
-                    leftBrakeRelay_3 = RELAY_CONNECT_AC;
-                    leftESC.stationary_braking_timer.stop();
-                    leftESC.stationary_braking_timer.reset();
-                }
+                if (enableBrakes) {
+                    if (leftESC.braking_state == STATIONARY_BRAKES_ON && (target_linear_vel != 0 || target_turn_vel != 0)) {
+                        leftESC.braking_state = NOT_BRAKING;
+                        leftESC.stationary_braking_timer.start();
+                        leftBrakeRelay_4.write(1.0f);
+                        leftBrakeRelay_5.write(1.0f);
+                        rightBrakeRelay_4.write(1.0f);
+                        rightBrakeRelay_5.write(1.0f);
+                    } else if (leftESC.braking_state == NOT_BRAKING && leftESC.stationary_braking_timer.read_ms() > 12) {
+                        leftBrakeRelay_1 = RELAY_CONNECT_AC;
+                        leftBrakeRelay_2 = RELAY_CONNECT_AC;
+                        leftBrakeRelay_3 = RELAY_CONNECT_AC;
+                        rightBrakeRelay_1 = RELAY_CONNECT_AC;
+                        rightBrakeRelay_2 = RELAY_CONNECT_AC;
+                        rightBrakeRelay_3 = RELAY_CONNECT_AC;
+                        leftESC.stationary_braking_timer.stop();
+                        leftESC.stationary_braking_timer.reset();
+                    }
 
-                if (rightESC.braking_state == STATIONARY_BRAKES_ON && (target_linear_vel != 0 || target_turn_vel != 0)) {
-                    rightESC.braking_state = NOT_BRAKING;
-                    rightESC.stationary_braking_timer.start();
-                    rightBrakeRelay_4.write(1.0f);
-                    rightBrakeRelay_5.write(1.0f);
-                } else if (rightESC.braking_state == NOT_BRAKING && rightESC.stationary_braking_timer.read_ms() > 12) {
-                    rightBrakeRelay_1 = RELAY_CONNECT_AC;
-                    rightBrakeRelay_2 = RELAY_CONNECT_AC;
-                    rightBrakeRelay_3 = RELAY_CONNECT_AC;
-                    rightESC.stationary_braking_timer.stop();
-                    rightESC.stationary_braking_timer.reset();
-                }
+                    if (leftESC.braking_state == NOT_BRAKING) {
+                        if (target_linear_vel > 0.0f) {                 // Set wheel directions to forwards if target linear velocity is positive
+                            leftESC.setDirection(LEFT_MOTOR_FORWARDS);
+                            rightESC.setDirection(RIGHT_MOTOR_FORWARDS);
+                            leftESC.setEnable(ENABLE);                  // Enable motors
+                            rightESC.setEnable(ENABLE);
+                            motorEnableLED = 1;                         // Turn on motor-enabled LED
+                        } else if (target_linear_vel < 0.0f) {           // Set wheel directions to backwards if target linear velocity is negative
+                            leftESC.setDirection(LEFT_MOTOR_BACKWARDS);
+                            rightESC.setDirection(RIGHT_MOTOR_BACKWARDS);
+                            leftESC.setEnable(ENABLE);                  // Enable motors
+                            rightESC.setEnable(ENABLE);
+                            motorEnableLED = 1;                         // Turn on motor-enabled LED
+                        } else if (target_linear_vel == 0.0f && target_turn_vel > 0.0f) { // Set wheel directions accordingly spin on the spot anti-clockwise
+                            leftESC.setDirection(LEFT_MOTOR_BACKWARDS);
+                            rightESC.setDirection(RIGHT_MOTOR_FORWARDS);
+                            leftESC.setEnable(ENABLE);                  // Enable motors
+                            rightESC.setEnable(ENABLE);
+                            motorEnableLED = 1;                         // Turn on motor-enabled LED
+                        } else if (target_linear_vel == 0.0f && target_turn_vel < 0.0f) { // Set wheel directions accordingly spin on the spot clockwise
+                            leftESC.setDirection(LEFT_MOTOR_FORWARDS);
+                            rightESC.setDirection(RIGHT_MOTOR_BACKWARDS);
+                            leftESC.setEnable(ENABLE);                  // Enable motors
+                            rightESC.setEnable(ENABLE);
+                            motorEnableLED = 1;                         // Turn on motor-enabled LED
+                        } else {                                        // Disable motors if all velocities are zero
+                            leftESC.setEnable(DISABLE);                 // Disable motors
+                            rightESC.setEnable(DISABLE);
+                            leftESC.stationary_braking_timer.start();
+                            leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
+                            leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
+                            leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
+                            rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
+                            rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
+                            rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
+                            leftESC.braking_state = STATIONARY;
 
-                if (leftESC.braking_state == NOT_BRAKING && rightESC.braking_state == NOT_BRAKING) {
+
+                            motorEnableLED = 0;                         // Turn off motor-enabled LED
+                        }
+
+                    }
+
+                    switch (leftESC.braking_state) {
+
+                    case STATIONARY:
+                        if (leftESC.stationary_braking_timer.read_ms() > 12) {
+                            leftBrakeRelay_4.write(0.0f);
+                            leftBrakeRelay_5.write(0.0f);
+                            rightBrakeRelay_4.write(0.0f);
+                            rightBrakeRelay_5.write(0.0f);
+                            leftESC.braking_state = STATIONARY_BRAKES_ON;
+                            leftESC.stationary_braking_timer.stop();
+                            leftESC.stationary_braking_timer.reset();
+                        }
+                        break;
+
+                    case NOT_BRAKING:
+                        if ( (abs(vrobot) > (abs(double(target_linear_vel)) + 0.4)) || (abs(vth) > (abs(double(target_turn_vel)) + 0.3)) ) {
+                            leftESC.setEnable(DISABLE);
+                            rightESC.setEnable(DISABLE);
+                            leftESC.braking_timer.start();
+                            leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
+                            leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
+                            leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
+                            rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
+                            rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
+                            rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
+                            leftESC.braking_state = START_BRAKING;
+                        }
+                        break;
+
+                    case START_BRAKING:
+                        if (leftESC.braking_timer.read_ms() > 12) {
+                            leftBrakeRelay_4.write(0.0f);
+                            leftBrakeRelay_5.write(0.0f);
+                            rightBrakeRelay_4.write(0.0f);
+                            rightBrakeRelay_5.write(0.0f);
+                            leftESC.braking_state = BRAKING;
+                            leftESC.braking_timer.reset();
+                        }
+                        break;
+
+                    case BRAKING:
+                        if ( (abs(vrobot) < abs(target_linear_vel)) && (abs(vth) < abs(target_turn_vel)) ) {
+                            if (leftESC.braking_timer.read_ms() > 12) {
+                                leftESC.braking_timer.reset();
+                                leftBrakeRelay_4.write(1.0f);
+                                leftBrakeRelay_5.write(1.0f);
+                                rightBrakeRelay_4.write(1.0f);
+                                rightBrakeRelay_5.write(1.0f);
+                                leftESC.braking_state = START_NOT_BRAKING;
+                            }
+                        }
+                        break;
+
+                    case START_NOT_BRAKING:
+                        if (leftESC.braking_timer.read_ms() > 12) {
+                            leftBrakeRelay_1 = RELAY_CONNECT_AC;
+                            leftBrakeRelay_2 = RELAY_CONNECT_AC;
+                            leftBrakeRelay_3 = RELAY_CONNECT_AC;
+                            rightBrakeRelay_1 = RELAY_CONNECT_AC;
+                            rightBrakeRelay_2 = RELAY_CONNECT_AC;
+                            rightBrakeRelay_3 = RELAY_CONNECT_AC;
+                            leftESC.braking_timer.stop();
+                            leftESC.braking_timer.reset();
+                            leftESC.braking_state = NOT_BRAKING;
+                            //leftMotorPID.resetIntegralTerm();
+                        }
+                        break;
+
+                    default:
+                        break;
+
+                    }
+
+                } else {
+
                     if (target_linear_vel > 0.0f) {                 // Set wheel directions to forwards if target linear velocity is positive
                         leftESC.setDirection(LEFT_MOTOR_FORWARDS);
                         rightESC.setDirection(RIGHT_MOTOR_FORWARDS);
@@ -450,174 +591,8 @@ int main() {
                     } else {                                        // Disable motors if all velocities are zero
                         leftESC.setEnable(DISABLE);                 // Disable motors
                         rightESC.setEnable(DISABLE);
-                        leftESC.stationary_braking_timer.start();
-                        rightESC.stationary_braking_timer.start();
-                        leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
-                        leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
-                        leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
-                        rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
-                        rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
-                        rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
-                        leftESC.braking_state = STATIONARY;
-                        rightESC.braking_state = STATIONARY;
-
                         motorEnableLED = 0;                         // Turn off motor-enabled LED
                     }
-
-                }
-                /*
-                leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
-                leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
-                leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
-                rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
-                rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
-                rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
-                
-                leftESC.braking_state = START_BRAKING;
-                leftESC.braking_timer.start();
-                rightESC.braking_state = START_BRAKING;
-                rightESC.braking_timer.start();
-                */
-                switch (leftESC.braking_state) {
-
-                case STATIONARY:
-                    if (leftESC.stationary_braking_timer.read_ms() > 12) {
-                        leftBrakeRelay_4.write(0.0f);
-                        leftBrakeRelay_5.write(0.0f);
-                        leftESC.braking_state = STATIONARY_BRAKES_ON;
-                        leftESC.stationary_braking_timer.stop();
-                        leftESC.stationary_braking_timer.reset();
-                    }
-                    break;
-
-                case NOT_BRAKING:
-                    if ( abs(v_left) > (abs(left_target_vel) + 0.20)) {
-                        leftESC.setEnable(DISABLE);
-                        leftESC.braking_timer.start();
-                        leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
-                        leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
-                        leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
-                        leftESC.braking_state = START_BRAKING;
-                    }
-                    break;
-
-                case START_BRAKING:
-                    if (leftESC.braking_timer.read_ms() > 12) {
-                        leftBrakeRelay_4.write(0.0f);
-                        leftBrakeRelay_5.write(0.0f);
-                        leftESC.braking_state = BRAKING;
-                        leftESC.setEnable(DISABLE);
-                        leftESC.braking_timer.reset();
-                    }
-                    break;
-
-                case BRAKING:
-                    if (abs(v_left) < (abs(left_target_vel) * 0.75)) {
-                        if (leftESC.braking_timer.read_ms() > 200) {
-                            leftESC.braking_timer.reset();
-                            leftBrakeRelay_4.write(1.0f);
-                            leftBrakeRelay_5.write(1.0f);
-                            leftESC.braking_state = START_NOT_BRAKING;
-                        }
-                    } else {       
-                                    
-                                    // When going over bumps the reported speed would sometimes
-                                    // stay really high so would never exist braking. This can
-                                    // hopefully be fixed by resetting comms to encoders.
-                        if (abs(v_left) > (abs(left_target_vel) + 0.5)) {
-                            AS5600 encoderLeft(PB_11, PB_10);       // Try to re-establish comms to encoders
-                        }
-
-                    }
-                    break;
-
-                case START_NOT_BRAKING:
-                    if (leftESC.braking_timer.read_ms() > 12) {
-                        leftBrakeRelay_1 = RELAY_CONNECT_AC;
-                        leftBrakeRelay_2 = RELAY_CONNECT_AC;
-                        leftBrakeRelay_3 = RELAY_CONNECT_AC;
-                        leftESC.braking_timer.stop();
-                        leftESC.braking_timer.reset();
-                        leftESC.braking_state = NOT_BRAKING;
-                        //leftMotorPID.resetIntegralTerm();
-                    }
-                    break;
-
-                default:
-                    break;
-
-                }
-
-
-                switch (rightESC.braking_state) {
-
-                case STATIONARY:
-                    if (rightESC.stationary_braking_timer.read_ms() > 12) {
-                        rightBrakeRelay_4.write(0.0f);
-                        rightBrakeRelay_5.write(0.0f);
-                        rightESC.braking_state = STATIONARY_BRAKES_ON;
-                        rightESC.stationary_braking_timer.stop();
-                        rightESC.stationary_braking_timer.reset();
-                    }
-                    break;
-
-                case NOT_BRAKING:
-                    if (abs(v_right) > (abs(right_target_vel) + 0.20)) {
-                        rightESC.setEnable(DISABLE);
-                        rightESC.braking_timer.start();
-                        rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
-                        rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
-                        rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
-                        rightESC.braking_state = START_BRAKING;
-                    }
-                    break;
-
-                case START_BRAKING:
-                    if (rightESC.braking_timer.read_ms() > 12) {
-                        rightBrakeRelay_4.write(0.0f);
-                        rightBrakeRelay_5.write(0.0f);
-                        rightESC.braking_state = BRAKING;
-                        rightESC.setEnable(DISABLE);
-                        rightESC.braking_timer.reset();
-                    }
-                    break;
-
-                case BRAKING:
-                    if (abs(v_right) < (abs(right_target_vel) * 0.75)) {
-                        if (rightESC.braking_timer.read_ms() > 200) {
-                            rightESC.braking_timer.reset();
-                            rightBrakeRelay_4.write(1.0f);
-                            rightBrakeRelay_5.write(1.0f);
-                            rightESC.braking_state = START_NOT_BRAKING;
-                        }
-                    } else {
-                        if(abs(v_right - old_v_right) < 0.001){
-                            AS5600 encoderRight(I2C_SDA, I2C_SCL); 
-                        }
-                        old_v_right = v_right;
-                                    // When going over bumps the reported speed would sometimes
-                                    // stay really high so would never exist braking. This can
-                                    // hopefully be fixed by resetting comms to encoders.
-                        if (abs(v_right) > (abs(right_target_vel) + 0.5)) {
-                            AS5600 encoderRight(I2C_SDA, I2C_SCL); // Try to re-establish comms to encoders
-                        }
-                    }
-                    break;
-
-                case START_NOT_BRAKING:
-                    if (rightESC.braking_timer.read_ms() > 12) {
-                        rightBrakeRelay_1 = RELAY_CONNECT_AC;
-                        rightBrakeRelay_2 = RELAY_CONNECT_AC;
-                        rightBrakeRelay_3 = RELAY_CONNECT_AC;
-                        rightESC.braking_timer.stop();
-                        rightESC.braking_timer.reset();
-                        rightESC.braking_state = NOT_BRAKING;
-                        //rightMotorPID.resetIntegralTerm();
-                    }
-                    break;
-
-                default:
-                    break;
 
                 }
 
@@ -625,6 +600,12 @@ int main() {
                 // Reset ESCs if movement ceases when it should not
                 if (target_linear_vel != 0 || target_turn_vel != 0) {
                     motor_stationary_timer.start();
+                } else {
+                    motor_stationary_timer.reset();
+                    motor_stationary_timer.stop();
+                }
+                if (delta_Left_Pos != 0 && delta_Right_Pos != 0) {
+                    motor_stationary_timer.reset();
                 }
                 if (motor_stationary_timer.read_ms() > 2000 && delta_Left_Pos == 0 && delta_Right_Pos == 0) {
                     // Reset motors if cmd_vel is sending velocities but robot isn't moving for more than 2000ms
@@ -742,7 +723,7 @@ int main() {
                 odom_exact_msg.twist.twist.linear.y = 0.0;        // Will always be zero as assuming there will be no "slippage"
                 odom_exact_msg.twist.twist.angular.z = vth;
 
-                if (!useEKF) {
+                if (!useSensorFusion) {
                     // Publish the message over ROS
                     odom_pub.publish(&odom_exact_msg);
                 } else {
@@ -750,10 +731,10 @@ int main() {
                 }
 
 
-                /******************************
-                BROADCAST A TF IF NOT USING EKF
-                ******************************/
-                if (!useEKF) {
+                /***************************************************
+                BROADCAST A TF IF NOT USING OR TESTING SENSOR FUSION
+                ***************************************************/
+                if (testSensorFusion || !useSensorFusion) {
                     // First publish the transform over tf
                     geometry_msgs::TransformStamped odom_trans;
                     odom_trans.header.stamp = current_time;
@@ -843,6 +824,8 @@ int main() {
                 // Assign current heading to new estimated heading
                 theta = new_theta;
 
+                left_esc_state_msg.data = leftESC.braking_state;
+
                 // Allow time for messages to be transmitted serially
                 wait_ms(4);
 
@@ -857,20 +840,22 @@ int main() {
             motorEnableLED = 0;
             tickerLED = 0;
             debugLED = 0;
-            leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
-            leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
-            leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
-            rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
-            rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
-            rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
-            wait_ms(12);
-            leftBrakeRelay_4.write(0.0f);
-            leftBrakeRelay_5.write(0.0f);
-            rightBrakeRelay_4.write(0.0f);
-            rightBrakeRelay_5.write(0.0f);
-            leftESC.braking_state = NOT_BRAKING;    // Reset state machines
-            rightESC.braking_state = NOT_BRAKING;
-            
+            if (enableBrakes) {
+                leftBrakeRelay_1 = RELAY_CONNECT_SHORT;
+                leftBrakeRelay_2 = RELAY_CONNECT_SHORT;
+                leftBrakeRelay_3 = RELAY_CONNECT_SHORT;
+                rightBrakeRelay_1 = RELAY_CONNECT_SHORT;
+                rightBrakeRelay_2 = RELAY_CONNECT_SHORT;
+                rightBrakeRelay_3 = RELAY_CONNECT_SHORT;
+                wait_ms(12);
+                leftBrakeRelay_4.write(0.0f);
+                leftBrakeRelay_5.write(0.0f);
+                rightBrakeRelay_4.write(0.0f);
+                rightBrakeRelay_5.write(0.0f);
+                leftESC.braking_state = NOT_BRAKING;    // Reset state machines
+                rightESC.braking_state = NOT_BRAKING;
+            }
+
         }
 
     }
